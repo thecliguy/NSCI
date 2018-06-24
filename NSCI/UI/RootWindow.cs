@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,9 +12,12 @@ using NDProperty.Providers.Binding;
 using NSCI.Propertys;
 using NSCI.UI;
 using NSCI.UI.Controls;
+using System.Runtime.InteropServices;
+
 
 namespace NSCI.UI
 {
+
     public partial class RootWindow : UI.Controls.ContentControl
     {
 
@@ -48,8 +51,47 @@ namespace NSCI.UI
 
         }
 
+        private const int STD_OUTPUT_HANDLE = -11;
+        private const uint _VIRTUAL_TERMINAL_PROCESSING = 0x0004;
+        private const uint DISABLE_NEWLINE_AUTO_RETURN = 0x0008;
+
+        [DllImport("kernel32.dll")]
+        private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetLastError();
+
+        static void EnableVirtualTerminalProcessingForWindows()
+        {
+            // https://www.jerriepelser.com/blog/using-ansi-color-codes-in-net-console-apps
+            var iStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+            if (!GetConsoleMode(iStdOut, out uint outConsoleMode))
+            {
+                Console.WriteLine("failed to get output console mode");
+                Console.ReadKey();
+                return;
+            }
+
+            outConsoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+            if (!SetConsoleMode(iStdOut, outConsoleMode))
+            {
+                Console.WriteLine($"failed to set output console mode, error code: {GetLastError()}");
+                Console.ReadKey();
+                return;
+            }
+        }
+
         private void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
         {
+            // Switch to the main buffer.
+            Console.WriteLine("\u001b[?1049l");
+
             if (this.options.OnCancelPressed == null)
             {
                 e.Cancel = false; // terminate process
@@ -143,11 +185,20 @@ namespace NSCI.UI
         {
             this.running = true;
 
+            // If OS is Windows then enable Virtual Terminal Processing.
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                EnableVirtualTerminalProcessingForWindows();
+            }
+                
+            // Switch to a new alternate screen buffer.
+            Console.WriteLine("\u001b[?1049h");
+
             var oldBufferHeight = Console.BufferHeight;
             var oldBufferWidth = Console.BufferWidth;
 
             var curserVisible = Console.CursorVisible;
-            
+
 
             Console.CancelKeyPress += Console_CancelKeyPress;
             Console.TreatControlCAsInput = options.TreatControlCAsInput;
